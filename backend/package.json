@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@deepgram/sdk": "^4.11.3",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.7.0",
     "cors": "^2.8.5",

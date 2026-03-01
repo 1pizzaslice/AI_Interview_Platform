@@ -5,6 +5,8 @@ import { AppError } from '../../shared/errors/app-error';
 import type { InterviewState, AntiCheatEvent } from '../../shared/types';
 import * as interviewService from './interview.service';
 import { config } from '../../config';
+import { createSTTAdapter } from '../../adapters/stt';
+import { createTTSAdapter } from '../../adapters/tts';
 
 interface WSClient {
   ws: WebSocket;
@@ -31,6 +33,89 @@ function sendError(ws: WebSocket, code: string, message: string): void {
   send(ws, { type: 'error', code, message });
 }
 
+async function sendAIMessageWithAudio(ws: WebSocket, text: string): Promise<void> {
+  send(ws, { type: 'ai_message', text });
+
+  try {
+    const tts = createTTSAdapter();
+    const audioBuffer = await tts.synthesize(text);
+    if (audioBuffer.length > 0 && ws.readyState === ws.OPEN) {
+      ws.send(audioBuffer);
+    }
+  } catch (err) {
+    console.error('[Gateway] TTS synthesis error:', err);
+    // Non-fatal: text message already sent, audio just won't play
+  }
+}
+
+async function handleAudioInput(
+  ws: WebSocket,
+  client: WSClient,
+  data: Buffer,
+  clients: Map<WebSocket, WSClient>,
+): Promise<void> {
+  if (!client.sessionId || !client.userId) {
+    sendError(ws, 'NOT_JOINED', 'Must join a session first');
+    return;
+  }
+
+  resetAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
+
+  let transcript: string;
+  try {
+    const stt = createSTTAdapter();
+    const result = await stt.transcribe(data, { mimeType: 'audio/webm' });
+    transcript = result.text.trim();
+  } catch (err) {
+    console.error('[Gateway] STT transcription error:', err);
+    sendError(ws, 'STT_ERROR', 'Failed to transcribe audio');
+    return;
+  }
+
+  if (!transcript) {
+    send(ws, { type: 'stt_empty' });
+    return;
+  }
+
+  send(ws, { type: 'candidate_transcript', text: transcript });
+
+  try {
+    const result = await interviewService.processAnswer(
+      client.sessionId,
+      client.userId,
+      transcript,
+    );
+
+    send(ws, {
+      type: 'transcript_update',
+      entry: result.transcriptEntry,
+    });
+
+    if (result.stateChanged) {
+      send(ws, {
+        type: 'state_change',
+        state: result.nextState,
+      });
+    }
+
+    await sendAIMessageWithAudio(ws, result.aiMessage);
+
+    if (result.isComplete) {
+      if (result.nextState === 'SCORING') {
+        send(ws, { type: 'interview_complete', sessionId: client.sessionId });
+      }
+      clearAnswerTimeout(client);
+    }
+  } catch (err) {
+    if (err instanceof AppError) {
+      sendError(ws, err.code, err.message);
+    } else {
+      console.error('[Gateway] processAnswer error (audio):', err);
+      sendError(ws, 'INTERNAL_ERROR', 'Failed to process answer');
+    }
+  }
+}
+
 export function setupInterviewGateway(wss: WebSocketServer): void {
   const clients = new Map<WebSocket, WSClient>();
 
@@ -38,7 +123,12 @@ export function setupInterviewGateway(wss: WebSocketServer): void {
     const client: WSClient = { ws, sessionId: null, userId: '', role: '' };
     clients.set(ws, client);
 
-    ws.on('message', async (data: Buffer) => {
+    ws.on('message', async (data: Buffer, isBinary: boolean) => {
+      if (isBinary) {
+        await handleAudioInput(ws, client, data, clients);
+        return;
+      }
+
       let event: ClientEvent;
       try {
         event = JSON.parse(data.toString()) as ClientEvent;
@@ -108,7 +198,7 @@ async function handleEvent(
 
         if (session.currentState === 'INTRO') {
           const introMessage = await interviewService.getIntroMessage();
-          send(ws, { type: 'ai_message', text: introMessage });
+          await sendAIMessageWithAudio(ws, introMessage);
         }
 
         startAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
@@ -149,7 +239,7 @@ async function handleEvent(
           });
         }
 
-        send(ws, { type: 'ai_message', text: result.aiMessage });
+        await sendAIMessageWithAudio(ws, result.aiMessage);
 
         if (result.isComplete) {
           if (result.nextState === 'SCORING') {
@@ -195,7 +285,7 @@ function startAnswerTimeout(
   timeoutMs: number,
 ): void {
   client.answerTimer = setTimeout(async () => {
-    send(client.ws, { type: 'ai_message', text: "Are you still there? Take your time." });
+    await sendAIMessageWithAudio(client.ws, "Are you still there? Take your time.");
 
     client.answerTimer = setTimeout(async () => {
       if (client.sessionId) {

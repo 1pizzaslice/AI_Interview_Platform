@@ -20,7 +20,7 @@ export interface WSClientEvent {
 }
 
 export interface WSServerEvent {
-  type: 'joined' | 'state_change' | 'ai_message' | 'transcript_update' | 'score_update' | 'interview_complete' | 'session_abandoned' | 'error' | 'pong';
+  type: 'joined' | 'state_change' | 'ai_message' | 'transcript_update' | 'score_update' | 'interview_complete' | 'session_abandoned' | 'error' | 'pong' | 'candidate_transcript' | 'stt_empty';
   sessionId?: string;
   currentState?: InterviewState;
   state?: InterviewState;

@@ -15,11 +15,13 @@ const configSchema = z.object({
 
   LLM_PROVIDER: z.enum(['claude', 'mock']).default('mock'),
   STT_PROVIDER: z.enum(['deepgram', 'mock']).default('mock'),
-  TTS_PROVIDER: z.enum(['elevenlabs', 'mock']).default('mock'),
+  TTS_PROVIDER: z.enum(['deepgram', 'elevenlabs', 'mock']).default('mock'),
   STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-6'),
+
+  DEEPGRAM_API_KEY: z.string().optional(),
 
   AWS_REGION: z.string().optional(),
   AWS_ACCESS_KEY_ID: z.string().optional(),
@@ -44,6 +46,14 @@ function validateConfig() {
 
   if (result.data.LLM_PROVIDER === 'claude' && !result.data.ANTHROPIC_API_KEY) {
     console.error('ANTHROPIC_API_KEY is required when LLM_PROVIDER=claude');
+    process.exit(1);
+  }
+
+  if (
+    (result.data.STT_PROVIDER === 'deepgram' || result.data.TTS_PROVIDER === 'deepgram') &&
+    !result.data.DEEPGRAM_API_KEY
+  ) {
+    console.error('DEEPGRAM_API_KEY is required when STT_PROVIDER=deepgram or TTS_PROVIDER=deepgram');
     process.exit(1);
   }
 
