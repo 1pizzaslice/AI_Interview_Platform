@@ -27,6 +27,10 @@ export default function InterviewPage() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const aiSpeakingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Streaming audio: collect chunks between audio_start / audio_end, then play in one shot
+  const audioStreamBufferRef = useRef<ArrayBuffer[]>([]);
+  const isStreamingRef = useRef(false);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [connected, setConnected] = useState(false);
@@ -36,6 +40,7 @@ export default function InterviewPage() {
   const [micError, setMicError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>('voice');
   const [noSpeechToast, setNoSpeechToast] = useState(false);
+  const [started, setStarted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const addMessage = useCallback((speaker: 'ai' | 'candidate', text: string) => {
@@ -78,6 +83,15 @@ export default function InterviewPage() {
     }
   }, []);
 
+  // "Start Interview" click: unlock AudioContext before WS connects so audio always has a gesture
+  const handleStart = useCallback(() => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new AudioContext();
+    }
+    void audioCtxRef.current.resume();
+    setStarted(true);
+  }, []);
+
   // Anti-cheat: tab/window visibility tracking
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -107,8 +121,10 @@ export default function InterviewPage() {
     };
   }, [sessionId]);
 
-  // WebSocket connection
+  // WebSocket connection — only after user clicks "Start Interview"
   useEffect(() => {
+    if (!token || !started) return;
+
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:4000';
     const ws = new WebSocket(`${wsUrl}/interview`);
     wsRef.current = ws;
@@ -120,9 +136,13 @@ export default function InterviewPage() {
     };
 
     ws.onmessage = (event: MessageEvent) => {
-      // Binary frame = TTS audio
+      // Binary frame = TTS audio chunk — buffer it if we're in a stream
       if (event.data instanceof ArrayBuffer) {
-        void playAudio(event.data);
+        if (isStreamingRef.current) {
+          audioStreamBufferRef.current.push(event.data);
+        } else {
+          void playAudio(event.data);
+        }
         return;
       }
 
@@ -136,11 +156,36 @@ export default function InterviewPage() {
       if (data.type === 'ai_message' && data.text) {
         addMessage('ai', data.text);
         setRecordingState('ai_speaking');
+        // Fallback: if audio_end never arrives (e.g. TTS error), recover after 15 s
         if (aiSpeakingFallbackRef.current) clearTimeout(aiSpeakingFallbackRef.current);
         aiSpeakingFallbackRef.current = setTimeout(
           () => setRecordingState(s => s === 'ai_speaking' ? 'idle' : s),
-          10_000,
+          15_000,
         );
+      }
+
+      if (data.type === 'audio_start') {
+        isStreamingRef.current = true;
+        audioStreamBufferRef.current = [];
+      }
+
+      if (data.type === 'audio_end') {
+        isStreamingRef.current = false;
+        const chunks = audioStreamBufferRef.current;
+        audioStreamBufferRef.current = [];
+
+        if (chunks.length > 0) {
+          // Concatenate all chunks into a single ArrayBuffer and play
+          const totalBytes = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+          const merged = new Uint8Array(totalBytes);
+          let offset = 0;
+          for (const chunk of chunks) {
+            merged.set(new Uint8Array(chunk), offset);
+            offset += chunk.byteLength;
+          }
+          void playAudio(merged.buffer);
+        }
+        // If chunks were empty (TTS error / empty response), fallback timer will recover state
       }
 
       if (data.type === 'candidate_transcript' && data.text) {
@@ -179,7 +224,7 @@ export default function InterviewPage() {
       clearInterval(ping);
       ws.close();
     };
-  }, [sessionId, token, setCurrentState, addMessage, playAudio]);
+  }, [sessionId, token, started, setCurrentState, addMessage, playAudio]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -195,7 +240,6 @@ export default function InterviewPage() {
 
   const toggleRecording = useCallback(async () => {
     if (recordingState === 'recording') {
-      // Stop recording
       mediaRecorderRef.current?.stop();
       return;
     }
@@ -224,10 +268,6 @@ export default function InterviewPage() {
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           setRecordingState('processing');
-          // Initialize AudioContext on first user interaction
-          if (!audioCtxRef.current) {
-            audioCtxRef.current = new AudioContext();
-          }
           void blob.arrayBuffer().then(buf => {
             wsRef.current?.send(buf);
           });
@@ -262,6 +302,29 @@ export default function InterviewPage() {
       sendTextAnswer();
     }
   };
+
+  // "Start Interview" gate — guarantees user gesture before AudioContext / WS connect
+  if (!started) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center space-y-6 max-w-sm px-6">
+          <div className="text-5xl">🎙</div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Ready to begin?</h1>
+            <p className="text-gray-500 text-sm mt-2">
+              Make sure you&apos;re in a quiet place. The AI interviewer will speak to you — keep your volume on.
+            </p>
+          </div>
+          <button
+            onClick={handleStart}
+            className="w-full py-3 bg-brand-600 text-white rounded-xl font-semibold text-base hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+          >
+            Start Interview
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (isComplete) {
     return (
@@ -338,7 +401,6 @@ export default function InterviewPage() {
 
         {inputMode === 'voice' ? (
           <div className="flex flex-col items-center gap-3">
-            {/* Mic button */}
             <button
               onClick={() => void toggleRecording()}
               disabled={micButtonDisabled}

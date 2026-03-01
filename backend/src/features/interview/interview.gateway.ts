@@ -40,13 +40,25 @@ async function sendAIMessageWithAudio(ws: WebSocket, client: WSClient, text: str
   client.pendingAudio = (async () => {
     try {
       const tts = createTTSAdapter();
-      const audioBuffer = await tts.synthesize(text);
-      if (audioBuffer.length > 0 && ws.readyState === ws.OPEN) {
-        ws.send(audioBuffer);
-      }
+      const stream = tts.synthesizeStream(text);
+      send(ws, { type: 'audio_start' });
+      await new Promise<void>((resolve) => {
+        stream.on('data', (chunk: Buffer) => {
+          if (chunk.length > 0 && ws.readyState === ws.OPEN) ws.send(chunk);
+        });
+        stream.on('end', () => {
+          send(ws, { type: 'audio_end' });
+          resolve();
+        });
+        stream.on('error', (err: Error) => {
+          console.error('[Gateway] TTS stream error:', err);
+          send(ws, { type: 'audio_end' });
+          resolve();
+        });
+      });
     } catch (err) {
       console.error('[Gateway] TTS synthesis error:', err);
-      // Non-fatal: text message already sent, audio just won't play
+      send(ws, { type: 'audio_end' });
     } finally {
       client.pendingAudio = null;
     }

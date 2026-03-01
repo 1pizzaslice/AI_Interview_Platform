@@ -43,16 +43,25 @@ export class DeepgramTTSAdapter implements ITTSAdapter {
 
   synthesizeStream(text: string, options?: SynthesisOptions): Readable {
     const readable = new Readable({ read() {} });
-
-    this.synthesize(text, options)
-      .then((buffer) => {
-        readable.push(buffer);
+    (async () => {
+      try {
+        const response = await this.client.speak.request(
+          { text },
+          { model: this.resolveVoice(options?.voice) },
+        );
+        const stream = await response.getStream();
+        if (!stream) throw new Error('[DeepgramTTS] No audio stream returned');
+        const reader = stream.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          readable.push(Buffer.from(value)); // push each chunk immediately
+        }
         readable.push(null);
-      })
-      .catch((err: Error) => {
-        readable.destroy(err);
-      });
-
+      } catch (err) {
+        readable.destroy(err as Error);
+      }
+    })();
     return readable;
   }
 }
