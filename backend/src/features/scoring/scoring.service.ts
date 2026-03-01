@@ -20,12 +20,18 @@ export async function scoreSession(sessionId: string): Promise<void> {
   // Delete any previously computed scores for this session (idempotent retry)
   await ScoreModel.deleteMany({ sessionId });
 
-  // Pair each generated question with the candidate's answer from the transcript
-  const candidateAnswers = session.transcript.filter(e => e.speaker === 'candidate');
-  const scoringPairs = session.generatedQuestions.map((q, i) => ({
-    question: q,
-    answer: candidateAnswers[i]?.text ?? '[No answer provided]',
-  }));
+  // Pair each generated question with the candidate's answer from the transcript.
+  // Only consider answers given during TOPIC_N states — warmup/wrap-up answers
+  // are excluded so they don't shift the index and mismatch with questions.
+  const scoringPairs = session.generatedQuestions.map((q, i) => {
+    const topicState = `TOPIC_${i + 1}`;
+    // Take the last candidate answer in that topic state (covers follow-up answers)
+    const topicAnswers = session.transcript.filter(
+      e => e.speaker === 'candidate' && e.state === topicState,
+    );
+    const answer = topicAnswers.at(-1)?.text ?? '[No answer provided]';
+    return { question: q, answer };
+  });
 
   const scoredAnswers = await Promise.all(
     scoringPairs.map(({ question, answer }) => scoreOneAnswer(question, answer)),
