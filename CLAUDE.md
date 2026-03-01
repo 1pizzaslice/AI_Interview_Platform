@@ -190,22 +190,52 @@ Timeout rules:
 
 ---
 
-## Docker Setup
+## Dev Startup Commands (run in order)
 
 ```bash
-# Start all backend services
-docker-compose up -d
+# 1. MongoDB + Redis (required first)
+docker-compose up -d mongodb redis
 
-# Services started:
-# - backend (port 4000)
-# - mongodb (port 27017)
-# - redis (port 6379)
+# 2. Backend API + WebSocket server (terminal 1)
+cd backend && npm run dev        # port 4000
 
-# Frontend runs separately
-cd frontend && npm run dev   # port 3000
+# 3. BullMQ scoring worker (terminal 2 — separate process, required for reports)
+cd backend && npm run worker
+
+# 4. Frontend (terminal 3)
+cd frontend && npm run dev       # port 3001
 ```
 
+> Note: `backend/.env` already has `LLM_PROVIDER=claude` and `ANTHROPIC_API_KEY` set.
+> Do not commit `.env` — it is gitignored.
+
 ---
+
+## Current Build Status (as of last session)
+
+All 6 phases complete and tested end-to-end with real Claude.
+
+**Bugs fixed (post-scaffold):**
+- `GET /api/jobs/:id` — now returns 404 for inactive jobs to candidates
+- `GET /api/interviews/:id` — ownership check added (IDOR fix)
+- `abandonSession()` — guards against invalid ObjectId (CastError fix)
+- `scoring.service.ts` — answers now matched by `TOPIC_N` state, not flat index (warmup answers were being scored as technical answers)
+
+**Verified working with real Claude (claude-sonnet-4-6):**
+- Resume upload → Claude parses skills, experience, education, summary
+- Session creation → Claude generates tailored questions from resume + job context
+- Full WebSocket interview: INTRO → WARMUP → TOPIC_1..N → WRAP_UP → SCORING → DONE
+- Scoring worker scores each TOPIC answer across 4 dimensions
+- Report generated with narrative, strengths, weaknesses, recommendation
+
+**Next areas to build:**
+- Phase 5: Wire real STT (Deepgram) and TTS (ElevenLabs) into the gateway
+- Frontend polish: loading states, error boundaries, auth guards on routes
+- Strong JWT secrets (currently using dev placeholders)
+
+---
+
+## Docker Setup (production)
 
 ## Conventions
 
