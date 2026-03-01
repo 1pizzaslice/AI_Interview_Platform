@@ -1,6 +1,6 @@
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'http';
-import { verifyAccessToken } from '../../shared/utils';
+import { verifyAccessToken, sanitizeForTTS } from '../../shared/utils';
 import { AppError } from '../../shared/errors/app-error';
 import type { InterviewState, AntiCheatEvent } from '../../shared/types';
 import * as interviewService from './interview.service';
@@ -36,11 +36,11 @@ function sendError(ws: WebSocket, code: string, message: string): void {
 }
 
 async function sendAIMessageWithAudio(ws: WebSocket, client: WSClient, text: string): Promise<void> {
-  send(ws, { type: 'ai_message', text });
+  send(ws, { type: 'ai_message', text }); // original text for chat display
   client.pendingAudio = (async () => {
     try {
       const tts = createTTSAdapter();
-      const stream = tts.synthesizeStream(text);
+      const stream = tts.synthesizeStream(sanitizeForTTS(text)); // clean text for TTS
       send(ws, { type: 'audio_start' });
       await new Promise<void>((resolve) => {
         stream.on('data', (chunk: Buffer) => {
