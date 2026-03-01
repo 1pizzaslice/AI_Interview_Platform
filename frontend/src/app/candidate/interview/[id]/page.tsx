@@ -25,6 +25,7 @@ export default function InterviewPage() {
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const aiSpeakingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -50,6 +51,11 @@ export default function InterviewPage() {
     if (arrayBuffer.byteLength === 0) {
       setRecordingState('idle');
       return;
+    }
+    // Cancel fallback — real audio arrived
+    if (aiSpeakingFallbackRef.current) {
+      clearTimeout(aiSpeakingFallbackRef.current);
+      aiSpeakingFallbackRef.current = null;
     }
     try {
       if (!audioCtxRef.current) {
@@ -129,6 +135,12 @@ export default function InterviewPage() {
 
       if (data.type === 'ai_message' && data.text) {
         addMessage('ai', data.text);
+        setRecordingState('ai_speaking');
+        if (aiSpeakingFallbackRef.current) clearTimeout(aiSpeakingFallbackRef.current);
+        aiSpeakingFallbackRef.current = setTimeout(
+          () => setRecordingState(s => s === 'ai_speaking' ? 'idle' : s),
+          10_000,
+        );
       }
 
       if (data.type === 'candidate_transcript' && data.text) {
@@ -226,6 +238,7 @@ export default function InterviewPage() {
 
       recorder.start(250);
       setRecordingState('recording');
+      wsRef.current?.send(JSON.stringify({ type: 'recording_start', sessionId }));
     } catch (err) {
       console.error('[Interview] Mic access error:', err);
       setMicError('Microphone access denied. Please allow mic access or use text mode.');

@@ -15,12 +15,14 @@ interface WSClient {
   role: string;
   pingTimer?: ReturnType<typeof setTimeout>;
   answerTimer?: ReturnType<typeof setTimeout>;
+  pendingAudio: Promise<void> | null;
 }
 
 type ClientEvent =
   | { type: 'join'; sessionId: string; token: string }
   | { type: 'answer'; sessionId: string; text: string }
   | { type: 'anticheat'; sessionId: string; event: AntiCheatEvent }
+  | { type: 'recording_start'; sessionId: string }
   | { type: 'ping' };
 
 function send(ws: WebSocket, event: object): void {
@@ -33,19 +35,23 @@ function sendError(ws: WebSocket, code: string, message: string): void {
   send(ws, { type: 'error', code, message });
 }
 
-async function sendAIMessageWithAudio(ws: WebSocket, text: string): Promise<void> {
+async function sendAIMessageWithAudio(ws: WebSocket, client: WSClient, text: string): Promise<void> {
   send(ws, { type: 'ai_message', text });
-
-  try {
-    const tts = createTTSAdapter();
-    const audioBuffer = await tts.synthesize(text);
-    if (audioBuffer.length > 0 && ws.readyState === ws.OPEN) {
-      ws.send(audioBuffer);
+  client.pendingAudio = (async () => {
+    try {
+      const tts = createTTSAdapter();
+      const audioBuffer = await tts.synthesize(text);
+      if (audioBuffer.length > 0 && ws.readyState === ws.OPEN) {
+        ws.send(audioBuffer);
+      }
+    } catch (err) {
+      console.error('[Gateway] TTS synthesis error:', err);
+      // Non-fatal: text message already sent, audio just won't play
+    } finally {
+      client.pendingAudio = null;
     }
-  } catch (err) {
-    console.error('[Gateway] TTS synthesis error:', err);
-    // Non-fatal: text message already sent, audio just won't play
-  }
+  })();
+  await client.pendingAudio;
 }
 
 async function handleAudioInput(
@@ -60,6 +66,8 @@ async function handleAudioInput(
   }
 
   resetAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
+
+  if (client.pendingAudio) await client.pendingAudio;
 
   let transcript: string;
   try {
@@ -98,7 +106,7 @@ async function handleAudioInput(
       });
     }
 
-    await sendAIMessageWithAudio(ws, result.aiMessage);
+    await sendAIMessageWithAudio(ws, client, result.aiMessage);
 
     if (result.isComplete) {
       if (result.nextState === 'SCORING') {
@@ -120,7 +128,7 @@ export function setupInterviewGateway(wss: WebSocketServer): void {
   const clients = new Map<WebSocket, WSClient>();
 
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
-    const client: WSClient = { ws, sessionId: null, userId: '', role: '' };
+    const client: WSClient = { ws, sessionId: null, userId: '', role: '', pendingAudio: null };
     clients.set(ws, client);
 
     ws.on('message', async (data: Buffer, isBinary: boolean) => {
@@ -198,7 +206,7 @@ async function handleEvent(
 
         if (session.currentState === 'INTRO') {
           const introMessage = await interviewService.getIntroMessage();
-          await sendAIMessageWithAudio(ws, introMessage);
+          await sendAIMessageWithAudio(ws, client, introMessage);
         }
 
         startAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
@@ -220,6 +228,8 @@ async function handleEvent(
 
       resetAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
 
+      if (client.pendingAudio) await client.pendingAudio;
+
       try {
         const result = await interviewService.processAnswer(
           client.sessionId,
@@ -239,7 +249,7 @@ async function handleEvent(
           });
         }
 
-        await sendAIMessageWithAudio(ws, result.aiMessage);
+        await sendAIMessageWithAudio(ws, client, result.aiMessage);
 
         if (result.isComplete) {
           if (result.nextState === 'SCORING') {
@@ -255,6 +265,12 @@ async function handleEvent(
           sendError(ws, 'INTERNAL_ERROR', 'Failed to process answer');
         }
       }
+      break;
+    }
+
+    case 'recording_start': {
+      if (!client.sessionId) return;
+      resetAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
       break;
     }
 
@@ -285,7 +301,7 @@ function startAnswerTimeout(
   timeoutMs: number,
 ): void {
   client.answerTimer = setTimeout(async () => {
-    await sendAIMessageWithAudio(client.ws, "Are you still there? Take your time.");
+    await sendAIMessageWithAudio(client.ws, client, "Are you still there? Take your time.");
 
     client.answerTimer = setTimeout(async () => {
       if (client.sessionId) {
