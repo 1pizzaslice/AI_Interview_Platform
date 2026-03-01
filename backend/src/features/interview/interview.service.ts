@@ -215,6 +215,7 @@ export async function recordAntiCheatEvent(sessionId: string, event: AntiCheatEv
 }
 
 export async function abandonSession(sessionId: string): Promise<void> {
+  if (!mongoose.isValidObjectId(sessionId)) return;
   await InterviewSessionModel.findByIdAndUpdate(sessionId, {
     $set: { currentState: 'ABANDONED', status: 'ABANDONED', completedAt: new Date() },
   });

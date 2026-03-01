@@ -29,6 +29,12 @@ export async function getSessionHandler(
 ): Promise<void> {
   try {
     const session = await interviewService.getSession(req.params['id'] ?? '');
+
+    if (req.user.role === 'candidate' && session.candidateId.toString() !== req.user.userId) {
+      next(AppError.forbidden('Not authorized to view this session'));
+      return;
+    }
+
     res.json({ success: true, data: session });
   } catch (err) {
     next(err);

@@ -15,10 +15,11 @@ export async function listJobs(role: 'candidate' | 'recruiter', recruiterId?: st
   return JobRoleModel.find(filter).sort({ createdAt: -1 }).lean();
 }
 
-export async function getJob(jobId: string) {
+export async function getJob(jobId: string, callerRole: 'candidate' | 'recruiter') {
   if (!mongoose.isValidObjectId(jobId)) throw AppError.notFound('Job not found');
   const job = await JobRoleModel.findById(jobId).lean();
   if (!job) throw AppError.notFound('Job not found');
+  if (!job.isActive && callerRole === 'candidate') throw AppError.notFound('Job not found');
   return job;
 }
 

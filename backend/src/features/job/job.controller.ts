@@ -41,7 +41,7 @@ export async function getJobHandler(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const job = await jobService.getJob(req.params['id'] ?? '');
+    const job = await jobService.getJob(req.params['id'] ?? '', req.user.role);
     res.json({ success: true, data: job });
   } catch (err) {
     next(err);
