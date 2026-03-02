@@ -1,17 +1,18 @@
 import mongoose from 'mongoose';
 import { config } from '../config';
+import { logger } from './logger';
 
 export async function connectDB(): Promise<void> {
   mongoose.connection.on('connected', () => {
-    console.log('[MongoDB] Connected');
+    logger.info('[MongoDB] Connected');
   });
 
   mongoose.connection.on('error', (err: Error) => {
-    console.error('[MongoDB] Connection error:', err.message);
+    logger.error({ err }, '[MongoDB] Connection error');
   });
 
   mongoose.connection.on('disconnected', () => {
-    console.warn('[MongoDB] Disconnected');
+    logger.warn('[MongoDB] Disconnected');
   });
 
   await mongoose.connect(config.MONGODB_URI, {
@@ -21,5 +22,5 @@ export async function connectDB(): Promise<void> {
 
 export async function disconnectDB(): Promise<void> {
   await mongoose.disconnect();
-  console.log('[MongoDB] Disconnected gracefully');
+  logger.info('[MongoDB] Disconnected gracefully');
 }

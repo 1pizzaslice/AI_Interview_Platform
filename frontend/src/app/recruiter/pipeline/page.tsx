@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
+import { ArrowLeft } from 'lucide-react';
 
 type Stage = 'applied' | 'screened' | 'interviewed' | 'offered' | 'rejected';
 
@@ -22,12 +23,12 @@ interface Job {
   domain: string;
 }
 
-const STAGES: { id: Stage; label: string; color: string }[] = [
-  { id: 'applied', label: 'Applied', color: 'bg-gray-100 border-gray-300' },
-  { id: 'screened', label: 'Screened', color: 'bg-blue-50 border-blue-300' },
-  { id: 'interviewed', label: 'Interviewed', color: 'bg-purple-50 border-purple-300' },
-  { id: 'offered', label: 'Offered', color: 'bg-green-50 border-green-300' },
-  { id: 'rejected', label: 'Rejected', color: 'bg-red-50 border-red-300' },
+const STAGES: { id: Stage; label: string; accentColor: string }[] = [
+  { id: 'applied', label: 'Applied', accentColor: 'bg-zinc-400' },
+  { id: 'screened', label: 'Screened', accentColor: 'bg-blue-400' },
+  { id: 'interviewed', label: 'Interviewed', accentColor: 'bg-purple-400' },
+  { id: 'offered', label: 'Offered', accentColor: 'bg-emerald-400' },
+  { id: 'rejected', label: 'Rejected', accentColor: 'bg-rose-400' },
 ];
 
 export default function PipelinePage() {
@@ -37,6 +38,7 @@ export default function PipelinePage() {
   const [selectedJob, setSelectedJob] = useState('');
   const [loading, setLoading] = useState(true);
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   function authHeaders() {
     return { Authorization: `Bearer ${token}` };
@@ -75,11 +77,15 @@ export default function PipelinePage() {
   }
 
   async function handleRemove(entryId: string) {
+    if (removingId) return;
+    setRemovingId(entryId);
     try {
       await api.delete(`/api/pipeline/${entryId}`, { headers: authHeaders() });
       setEntries(prev => prev.filter(e => e._id !== entryId));
     } catch (err) {
       console.error('Failed to remove from pipeline:', err);
+    } finally {
+      setRemovingId(null);
     }
   }
 
@@ -100,40 +106,42 @@ export default function PipelinePage() {
     <div className="min-h-screen p-8 max-w-full mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Candidate Pipeline</h1>
-          <p className="text-gray-500 text-sm mt-1">Drag candidates between stages</p>
+          <h1 className="text-2xl font-bold text-zinc-100">Candidate Pipeline</h1>
+          <p className="text-zinc-400 text-sm mt-1">Drag candidates between stages</p>
         </div>
         <div className="flex gap-3 items-center">
           <select
             value={selectedJob}
             onChange={e => setSelectedJob(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-colors"
           >
             <option value="">All Jobs</option>
             {jobs.map(j => (
               <option key={j._id} value={j._id}>{j.title}</option>
             ))}
           </select>
-          <Link href="/recruiter/dashboard" className="text-sm text-brand-600 hover:underline">
-            Dashboard
+          <Link href="/recruiter/dashboard" className="text-sm text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition-colors">
+            <ArrowLeft className="w-4 h-4" /> Dashboard
           </Link>
         </div>
       </div>
 
-      {loading && <p className="text-gray-500 text-sm">Loading pipeline...</p>}
+      {loading && <p className="text-zinc-500 text-sm">Loading pipeline...</p>}
 
       {!loading && (
         <div className="flex gap-4 overflow-x-auto pb-4">
           {STAGES.map(stage => (
             <div
               key={stage.id}
-              className={`flex-shrink-0 w-64 rounded-lg border-2 p-3 min-h-[400px] ${stage.color}`}
+              className="flex-shrink-0 w-64 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-3 min-h-[400px]"
               onDragOver={e => e.preventDefault()}
               onDrop={() => handleDrop(stage.id)}
             >
+              {/* Colored accent stripe */}
+              <div className={`h-1 ${stage.accentColor} rounded-full mb-3`} />
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold">{stage.label}</h3>
-                <span className="text-xs text-gray-500 bg-white/60 px-1.5 py-0.5 rounded">
+                <h3 className="text-sm font-semibold text-zinc-200">{stage.label}</h3>
+                <span className="text-xs text-zinc-500 bg-white/5 px-1.5 py-0.5 rounded">
                   {entriesByStage(stage.id).length}
                 </span>
               </div>
@@ -144,23 +152,30 @@ export default function PipelinePage() {
                     key={entry._id}
                     draggable
                     onDragStart={() => handleDragStart(entry._id)}
-                    className="bg-white rounded-lg p-3 shadow-sm border cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow"
+                    className="bg-white/5 border border-white/10 rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-purple-500/50 hover:shadow-[0_0_15px_rgba(168,85,247,0.1)] transition-all duration-200"
                   >
-                    <p className="font-medium text-sm">{entry.candidateId.name}</p>
-                    <p className="text-xs text-gray-500">{entry.candidateId.email}</p>
-                    <p className="text-xs text-gray-400 mt-1">{entry.jobRoleId.title}</p>
+                    <p className="font-medium text-sm text-zinc-200">{entry.candidateId.name}</p>
+                    <p className="text-xs text-zinc-500">{entry.candidateId.email}</p>
+                    <p className="text-xs text-zinc-600 mt-1">{entry.jobRoleId.title}</p>
                     {entry.notes && (
-                      <p className="text-xs text-gray-500 mt-2 italic border-t pt-1">{entry.notes}</p>
+                      <p className="text-xs text-zinc-500 mt-2 italic border-t border-white/5 pt-1">{entry.notes}</p>
                     )}
                     <div className="flex justify-between items-center mt-2">
-                      <span className="text-[10px] text-gray-400">
+                      <span className="text-[10px] text-zinc-600">
                         {new Date(entry.updatedAt).toLocaleDateString()}
                       </span>
                       <button
                         onClick={() => void handleRemove(entry._id)}
-                        className="text-[10px] text-red-400 hover:text-red-600"
+                        disabled={removingId !== null}
+                        className={`text-[10px] transition-colors ${
+                          removingId === entry._id
+                            ? 'text-rose-400/60 cursor-not-allowed'
+                            : removingId !== null
+                              ? 'text-rose-400/30 cursor-not-allowed'
+                              : 'text-rose-400/60 hover:text-rose-400'
+                        }`}
                       >
-                        Remove
+                        {removingId === entry._id ? 'Removing...' : 'Remove'}
                       </button>
                     </div>
                   </div>
@@ -172,7 +187,7 @@ export default function PipelinePage() {
       )}
 
       {!loading && entries.length === 0 && (
-        <p className="text-gray-500 text-sm text-center">
+        <p className="text-zinc-500 text-sm text-center">
           No candidates in the pipeline yet. Candidates will appear here after their interviews are completed.
         </p>
       )}

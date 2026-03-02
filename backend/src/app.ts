@@ -57,22 +57,6 @@ export function createApp() {
     message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many registration attempts, please try again later' } },
   });
 
-  const interviewCreateLimiter = rateLimit({
-    windowMs: 3_600_000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many interview sessions created, please try again later' } },
-  });
-
-  const resumeUploadLimiter = rateLimit({
-    windowMs: 3_600_000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many resume uploads, please try again later' } },
-  });
-
   app.use('/api', globalLimiter);
   app.use('/api/auth/login', authLoginLimiter);
   app.use('/api/auth/register', authRegisterLimiter);
@@ -91,8 +75,7 @@ export function createApp() {
   app.use('/api/auth', authRoutes);
   app.use('/api/candidates', candidateRoutes);
   app.use('/api/jobs', jobRoutes);
-  app.use('/api/interviews', interviewCreateLimiter, interviewRoutes);
-  app.use('/api/candidates/resume', resumeUploadLimiter);
+  app.use('/api/interviews', interviewRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/question-banks', questionBankRoutes);
   app.use('/api/pipeline', pipelineRoutes);

@@ -66,27 +66,27 @@ export default function ProgressStepper({ currentState, totalQuestions, currentQ
   const steps = parseSteps(currentState, totalQuestions, currentQuestionIndex);
 
   return (
-    <div className="flex items-center gap-1 px-4 py-2 bg-white/80 backdrop-blur-sm border-b">
+    <div className="flex items-center gap-1 px-4 py-2 bg-zinc-900/80 backdrop-blur-xl border-b border-white/5">
       {steps.map((step, i) => (
         <div key={step.id} className="flex items-center">
           {i > 0 && (
             <div className={cn(
               'w-6 h-0.5 mx-1',
-              step.state === 'upcoming' ? 'bg-gray-200' : 'bg-brand-500',
+              step.state === 'upcoming' ? 'bg-zinc-800' : 'bg-gradient-to-r from-purple-500 to-violet-500',
             )} />
           )}
           <div className="flex items-center gap-1.5">
             <div className={cn(
               'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold',
-              step.state === 'completed' && 'bg-brand-500 text-white',
-              step.state === 'active' && 'bg-brand-100 text-brand-700 ring-2 ring-brand-500',
-              step.state === 'upcoming' && 'bg-gray-100 text-gray-400',
+              step.state === 'completed' && 'bg-purple-500 text-white',
+              step.state === 'active' && 'bg-zinc-800 text-purple-400 ring-2 ring-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]',
+              step.state === 'upcoming' && 'bg-zinc-800 text-zinc-500',
             )}>
               {step.state === 'completed' ? '\u2713' : i + 1}
             </div>
             <span className={cn(
               'text-xs font-medium',
-              step.state === 'active' ? 'text-brand-700' : step.state === 'completed' ? 'text-gray-600' : 'text-gray-400',
+              step.state === 'active' ? 'text-purple-400' : step.state === 'completed' ? 'text-zinc-400' : 'text-zinc-600',
             )}>
               {step.label}
             </span>

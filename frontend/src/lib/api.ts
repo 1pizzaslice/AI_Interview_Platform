@@ -80,8 +80,8 @@ api.interceptors.response.use(
         { headers: { 'Content-Type': 'application/json' } },
       );
 
-      const newAccessToken = data.accessToken;
-      const newRefreshToken = data.refreshToken;
+      const newAccessToken = data.data.accessToken;
+      const newRefreshToken = data.data.refreshToken;
 
       // Update localStorage for the request interceptor
       localStorage.setItem('accessToken', newAccessToken);
@@ -105,6 +105,7 @@ api.interceptors.response.use(
       // Clear auth and redirect to login
       localStorage.removeItem('accessToken');
       localStorage.removeItem('auth-storage');
+      document.cookie = 'auth-hint=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
         window.location.href = '/login';
       }

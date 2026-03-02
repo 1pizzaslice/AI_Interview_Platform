@@ -15,6 +15,6 @@ router.get('/recruiter/analytics', requireRole('recruiter') as RequestHandler, g
 router.get('/recruiter/compare', requireRole('recruiter') as RequestHandler, compareReportsHandler as unknown as RequestHandler);
 router.get('/:sessionId/export', requireRole('recruiter') as RequestHandler, exportReportHandler as unknown as RequestHandler);
 router.get('/:sessionId/feedback', getCandidateFeedbackHandler as unknown as RequestHandler);
-router.get('/:sessionId', getReportHandler as unknown as RequestHandler);
+router.get('/:sessionId', requireRole('recruiter') as RequestHandler, getReportHandler as unknown as RequestHandler);
 
 export default router;

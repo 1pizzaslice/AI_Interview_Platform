@@ -1,5 +1,7 @@
 import type { Response, NextFunction } from 'express';
 import type { AuthenticatedRequest } from '../../shared/types';
+import { createQuestionBankSchema, updateQuestionBankSchema } from '../../shared/validators';
+import { AppError } from '../../shared/errors/app-error';
 import * as qbService from './question-bank.service';
 
 export async function createQuestionBankHandler(
@@ -8,7 +10,11 @@ export async function createQuestionBankHandler(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const bank = await qbService.createQuestionBank(req.user.userId, req.body);
+    const parsed = createQuestionBankSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw AppError.badRequest(parsed.error.errors.map(e => e.message).join(', '));
+    }
+    const bank = await qbService.createQuestionBank(req.user.userId, parsed.data);
     res.status(201).json({ success: true, data: bank });
   } catch (err) {
     next(err);
@@ -47,7 +53,11 @@ export async function updateQuestionBankHandler(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const bank = await qbService.updateQuestionBank(req.params['id'] ?? '', req.user.userId, req.body);
+    const parsed = updateQuestionBankSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw AppError.badRequest(parsed.error.errors.map(e => e.message).join(', '));
+    }
+    const bank = await qbService.updateQuestionBank(req.params['id'] ?? '', req.user.userId, parsed.data);
     res.json({ success: true, data: bank });
   } catch (err) {
     next(err);

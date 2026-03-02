@@ -10,9 +10,9 @@ import { createTTSAdapter } from '../../adapters/tts';
 import { logger } from '../../lib/logger';
 
 // --- Graduated silence thresholds (in ms) ---
-const SILENCE_NUDGE_MS = 10_000;       // 10s: gentle nudge
-const SILENCE_CHECK_MS = 25_000;       // 25s: "Are you still there?"
-const SILENCE_ABANDON_MS = 45_000;     // 45s: abandon session
+const SILENCE_NUDGE_MS = 90_000;       // 90s: gentle nudge
+const SILENCE_CHECK_MS = 180_000;      // 3min: "Are you still there?"
+const SILENCE_ABANDON_MS = 300_000;    // 5min: abandon session
 
 interface WSClient {
   ws: WebSocket;
@@ -27,6 +27,7 @@ interface WSClient {
   lastAiMessageAt: number | null;
   liveSTT: ILiveSTTSession | null;
   isTTSSpeaking: boolean;
+  isUserSpeaking: boolean;
   accumulatedTranscript: string;
 }
 
@@ -35,6 +36,7 @@ type ClientEvent =
   | { type: 'answer'; sessionId: string; text: string }
   | { type: 'anticheat'; sessionId: string; event: AntiCheatEvent }
   | { type: 'recording_start'; sessionId: string }
+  | { type: 'playback_complete'; sessionId: string }
   | { type: 'ping' };
 
 function send(ws: WebSocket, event: object): void {
@@ -132,7 +134,7 @@ async function handleAudioInput(
 async function processAnswerAndRespond(
   ws: WebSocket,
   client: WSClient,
-  clients: Map<WebSocket, WSClient>,
+  _clients: Map<WebSocket, WSClient>,
   answerText: string,
   responseTimeMs: number | null,
 ): Promise<void> {
@@ -164,7 +166,9 @@ async function processAnswerAndRespond(
       }
       clearSilenceTimers(client);
     } else {
-      resetSilenceTimers(client, clients);
+      // Don't restart timers here — wait for client's playback_complete event
+      // so timers don't fire while the candidate is still listening to the AI
+      clearSilenceTimers(client);
     }
   } catch (err) {
     if (err instanceof AppError) {
@@ -195,6 +199,7 @@ function setupLiveSTT(ws: WebSocket, client: WSClient, clients: Map<WebSocket, W
   });
 
   liveSession.on('utterance_end', () => {
+    client.isUserSpeaking = false;
     const fullTranscript = client.accumulatedTranscript.trim();
     if (!fullTranscript) return;
 
@@ -209,6 +214,7 @@ function setupLiveSTT(ws: WebSocket, client: WSClient, clients: Map<WebSocket, W
   });
 
   liveSession.on('speech_started', () => {
+    client.isUserSpeaking = true;
     // Interruption handling: if AI is speaking and candidate starts talking
     if (client.isTTSSpeaking) {
       send(ws, { type: 'audio_stop' });
@@ -242,6 +248,7 @@ export function setupInterviewGateway(wss: WebSocketServer): void {
       lastAiMessageAt: null,
       liveSTT: null,
       isTTSSpeaking: false,
+      isUserSpeaking: false,
       accumulatedTranscript: '',
     };
     clients.set(ws, client);
@@ -328,9 +335,11 @@ async function handleEvent(
         if (session.currentState === 'INTRO') {
           const introMessage = await interviewService.getIntroMessage(event.sessionId);
           await sendAIMessageWithAudio(ws, client, introMessage);
+          // Don't start silence timers here — client's playback_complete will trigger them
+        } else {
+          // Non-INTRO rejoin (e.g. reconnect mid-interview): start timers as fallback
+          startSilenceTimers(client, clients);
         }
-
-        startSilenceTimers(client, clients);
       } catch (err) {
         if (err instanceof AppError) {
           sendError(ws, err.code, err.message);
@@ -365,6 +374,13 @@ async function handleEvent(
       break;
     }
 
+    case 'playback_complete': {
+      if (!client.sessionId) return;
+      // Client finished playing AI audio — now start counting silence
+      resetSilenceTimers(client, clients);
+      break;
+    }
+
     case 'anticheat': {
       if (!client.sessionId) return;
       try {
@@ -392,18 +408,31 @@ function startSilenceTimers(
   client: WSClient,
   _clients: Map<WebSocket, WSClient>,
 ): void {
-  // Nudge after 10s of silence
+  // Nudge after 90s of silence
   client.silenceNudgeTimer = setTimeout(async () => {
+    // Skip if AI is still speaking or user is mid-answer; reschedule
+    if (client.isTTSSpeaking || client.isUserSpeaking) {
+      resetSilenceTimers(client, _clients);
+      return;
+    }
     await sendAIMessageWithAudio(client.ws, client, "Take your time, I'm here whenever you're ready.");
   }, SILENCE_NUDGE_MS);
 
-  // Check after 25s
+  // Check after 3min
   client.silenceCheckTimer = setTimeout(async () => {
+    if (client.isTTSSpeaking || client.isUserSpeaking) {
+      resetSilenceTimers(client, _clients);
+      return;
+    }
     await sendAIMessageWithAudio(client.ws, client, "Are you still there? No rush at all.");
   }, SILENCE_CHECK_MS);
 
-  // Abandon after 45s
+  // Abandon after 5min
   client.silenceAbandonTimer = setTimeout(async () => {
+    if (client.isTTSSpeaking || client.isUserSpeaking) {
+      resetSilenceTimers(client, _clients);
+      return;
+    }
     if (client.sessionId) {
       try {
         await interviewService.abandonSession(client.sessionId);

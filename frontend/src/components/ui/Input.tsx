@@ -12,7 +12,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div>
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium mb-1">
+          <label htmlFor={inputId} className="block text-sm font-medium text-zinc-400 mb-1">
             {label}
           </label>
         )}
@@ -20,13 +20,13 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500',
-            error && 'border-red-500 focus:ring-red-500',
+            'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors',
+            error && 'border-rose-500/50 focus:ring-rose-500/50 focus:border-rose-500/50',
             className,
           )}
           {...props}
         />
-        {error && <p className="text-red-600 text-xs mt-1">{error}</p>}
+        {error && <p className="text-rose-400 text-xs mt-1">{error}</p>}
       </div>
     );
   },
@@ -45,7 +45,7 @@ const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
     return (
       <div>
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium mb-1">
+          <label htmlFor={inputId} className="block text-sm font-medium text-zinc-400 mb-1">
             {label}
           </label>
         )}
@@ -53,13 +53,13 @@ const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none',
-            error && 'border-red-500 focus:ring-red-500',
+            'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 resize-none transition-colors',
+            error && 'border-rose-500/50 focus:ring-rose-500/50 focus:border-rose-500/50',
             className,
           )}
           {...props}
         />
-        {error && <p className="text-red-600 text-xs mt-1">{error}</p>}
+        {error && <p className="text-rose-400 text-xs mt-1">{error}</p>}
       </div>
     );
   },

@@ -23,10 +23,12 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       setAuth: (accessToken, refreshToken, user) => {
         localStorage.setItem('accessToken', accessToken);
+        document.cookie = `auth-hint=${JSON.stringify({ role: user.role })}; path=/; SameSite=Lax`;
         set({ accessToken, refreshToken, user });
       },
       clearAuth: () => {
         localStorage.removeItem('accessToken');
+        document.cookie = 'auth-hint=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
         set({ accessToken: null, refreshToken: null, user: null });
       },
     }),

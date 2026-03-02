@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { CheckCircle2, XCircle, Loader2, Monitor, Mic, Volume2, Camera, Wifi } from 'lucide-react';
 
 interface CheckResult {
   browser: 'pass' | 'fail' | 'pending';
   microphone: 'pass' | 'fail' | 'pending';
   speaker: 'pass' | 'fail' | 'pending';
+  camera: 'pass' | 'fail' | 'pending';
   network: 'pass' | 'fail' | 'pending';
 }
 
@@ -19,6 +22,7 @@ export default function EquipmentCheck({ onReady, onSkipToText }: EquipmentCheck
     browser: 'pending',
     microphone: 'pending',
     speaker: 'pending',
+    camera: 'pending',
     network: 'pending',
   });
   const [micLevel, setMicLevel] = useState(0);
@@ -47,7 +51,6 @@ export default function EquipmentCheck({ onReady, onSkipToText }: EquipmentCheck
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // Set up VU meter
       const audioCtx = new AudioContext();
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
@@ -55,7 +58,6 @@ export default function EquipmentCheck({ onReady, onSkipToText }: EquipmentCheck
       source.connect(analyser);
       analyserRef.current = analyser;
 
-      // Monitor levels for a few seconds
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       let maxLevel = 0;
       const startTime = Date.now();
@@ -70,27 +72,24 @@ export default function EquipmentCheck({ onReady, onSkipToText }: EquipmentCheck
         if (Date.now() - startTime < 3000) {
           animRef.current = requestAnimationFrame(monitor);
         } else {
-          // If we got any audio signal, mic works
           setChecks(prev => ({
             ...prev,
-            microphone: maxLevel > 5 ? 'pass' : 'pass', // pass even if quiet — mic is accessible
+            microphone: maxLevel > 5 ? 'pass' : 'fail',
           }));
         }
       };
       monitor();
-
-      setChecks(prev => ({ ...prev, microphone: 'pass' }));
     } catch {
       setChecks(prev => ({ ...prev, microphone: 'fail' }));
     }
 
-    // 3. Speaker test (just check AudioContext works)
+    // 3. Speaker test
     try {
       const ctx = new AudioContext();
       await ctx.resume();
       const oscillator = ctx.createOscillator();
       const gain = ctx.createGain();
-      gain.gain.value = 0.05; // very quiet
+      gain.gain.value = 0.05;
       oscillator.connect(gain);
       gain.connect(ctx.destination);
       oscillator.frequency.value = 440;
@@ -104,7 +103,18 @@ export default function EquipmentCheck({ onReady, onSkipToText }: EquipmentCheck
       setChecks(prev => ({ ...prev, speaker: 'fail' }));
     }
 
-    // 4. Network latency check
+    // 4. Camera access
+    try {
+      const camStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 320, height: 240, facingMode: 'user' },
+      });
+      camStream.getTracks().forEach(t => t.stop());
+      setChecks(prev => ({ ...prev, camera: 'pass' }));
+    } catch {
+      setChecks(prev => ({ ...prev, camera: 'fail' }));
+    }
+
+    // 5. Network latency check
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
       const start = Date.now();
@@ -130,71 +140,70 @@ export default function EquipmentCheck({ onReady, onSkipToText }: EquipmentCheck
   }, [runChecks]);
 
   const statusIcon = (status: string) => {
-    if (status === 'pass') return <span className="text-green-500 text-lg">&#10003;</span>;
-    if (status === 'fail') return <span className="text-red-500 text-lg">&#10007;</span>;
-    return <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin inline-block" />;
+    if (status === 'pass') return <CheckCircle2 className="w-5 h-5 text-emerald-400" />;
+    if (status === 'fail') return <XCircle className="w-5 h-5 text-rose-400" />;
+    return <Loader2 className="w-5 h-5 text-zinc-400 animate-spin" />;
   };
 
+  const checkItems = [
+    { key: 'browser', label: 'Browser compatibility', icon: Monitor },
+    { key: 'microphone', label: 'Microphone access', icon: Mic },
+    { key: 'speaker', label: 'Speaker output', icon: Volume2 },
+    { key: 'camera', label: 'Camera access', icon: Camera },
+    { key: 'network', label: 'Network connection', icon: Wifi },
+  ] as const;
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="bg-white rounded-xl border shadow-sm p-8 max-w-md w-full space-y-6">
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8 max-w-md w-full space-y-6"
+      >
         <div className="text-center">
-          <h1 className="text-xl font-bold text-gray-900">Equipment Check</h1>
-          <p className="text-sm text-gray-500 mt-1">Let&apos;s make sure everything is working before we start.</p>
+          <h1 className="text-xl font-bold text-zinc-100">Equipment Check</h1>
+          <p className="text-sm text-zinc-400 mt-1">Let&apos;s make sure everything is working before we start.</p>
         </div>
 
         <div className="space-y-4">
-          {/* Browser */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Browser compatibility</span>
-            {statusIcon(checks.browser)}
-          </div>
-
-          {/* Microphone */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-700">Microphone access</span>
-              {statusIcon(checks.microphone)}
-            </div>
-            {checks.microphone === 'pass' && (
-              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-green-500 rounded-full transition-all duration-100"
-                  style={{ width: `${micLevel}%` }}
-                />
+          {checkItems.map(item => (
+            <div key={item.key}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <item.icon className="w-4 h-4 text-zinc-500" />
+                  <span className="text-sm text-zinc-300">{item.label}</span>
+                </div>
+                {statusIcon(checks[item.key])}
               </div>
-            )}
-          </div>
-
-          {/* Speaker */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Speaker output</span>
-            {statusIcon(checks.speaker)}
-          </div>
-
-          {/* Network */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Network connection</span>
-            {statusIcon(checks.network)}
-          </div>
+              {item.key === 'microphone' && checks.microphone === 'pass' && (
+                <div className="mt-2 h-2 bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-purple-500 to-violet-500 rounded-full transition-all duration-100"
+                    style={{ width: `${micLevel}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
         </div>
 
         <div className="space-y-3 pt-2">
           <button
             onClick={onReady}
             disabled={!allPassed && !hasFail}
-            className="w-full py-3 bg-brand-600 text-white rounded-xl font-semibold text-base hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50"
+            className="w-full py-3 bg-gradient-to-r from-purple-500 to-violet-500 text-white rounded-xl font-semibold text-base hover:from-purple-600 hover:to-violet-600 hover:shadow-[0_0_20px_rgba(168,85,247,0.3)] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:opacity-50"
           >
             {checking ? 'Checking...' : allPassed ? 'Start Interview' : hasFail ? 'Start Anyway' : 'Checking...'}
           </button>
           <button
             onClick={onSkipToText}
-            className="w-full text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            className="w-full text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
           >
             Skip to text mode
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

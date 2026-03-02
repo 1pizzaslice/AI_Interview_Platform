@@ -1,10 +1,39 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
+import { CheckCircle2, XCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
+
+function useExportDownload() {
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  const download = useCallback(async (sessionId: string, format: 'csv' | 'pdf') => {
+    setExporting(format);
+    try {
+      const res = await api.get(`/api/reports/${sessionId}/export?format=${format}`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data as BlobPart]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report-${sessionId}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(`Export ${format} failed:`, err);
+    } finally {
+      setExporting(null);
+    }
+  }, []);
+
+  return { download, exporting };
+}
 
 interface Report {
   _id: string;
@@ -32,10 +61,10 @@ interface Report {
 }
 
 const recommendationColor: Record<string, string> = {
-  STRONG_HIRE: 'bg-green-100 text-green-800 border-green-200',
-  HIRE: 'bg-blue-100 text-blue-800 border-blue-200',
-  BORDERLINE: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  NO_HIRE: 'bg-red-100 text-red-800 border-red-200',
+  STRONG_HIRE: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  HIRE: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  BORDERLINE: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  NO_HIRE: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
 };
 
 export default function ReportPage() {
@@ -44,6 +73,7 @@ export default function ReportPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const { download, exporting } = useExportDownload();
 
   useEffect(() => {
     api.get<{ data: Report }>(`/api/reports/${sessionId}`, {
@@ -54,12 +84,12 @@ export default function ReportPage() {
       .finally(() => setLoading(false));
   }, [sessionId, token]);
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><p className="text-gray-500">Loading report...</p></div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><p className="text-zinc-400">Loading report...</p></div>;
   if (error || !report) return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="text-center space-y-3">
-        <p className="text-gray-600">{error}</p>
-        <Link href="/recruiter/dashboard" className="text-brand-600 hover:underline text-sm">Back to Dashboard</Link>
+        <p className="text-zinc-400">{error}</p>
+        <Link href="/recruiter/dashboard" className="text-purple-400 hover:text-purple-300 text-sm transition-colors">Back to Dashboard</Link>
       </div>
     </div>
   );
@@ -74,52 +104,56 @@ export default function ReportPage() {
   return (
     <div className="min-h-screen p-8 max-w-4xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
-        <Link href="/recruiter/dashboard" className="text-gray-400 hover:text-gray-600 text-sm">← Dashboard</Link>
+        <Link href="/recruiter/dashboard" className="text-zinc-500 hover:text-zinc-300 text-sm flex items-center gap-1 transition-colors">
+          <ArrowLeft className="w-4 h-4" /> Dashboard
+        </Link>
         <div className="flex gap-2">
-          <a
-            href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/api/reports/${sessionId}/export?format=csv`}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
+          <button
+            onClick={() => void download(sessionId, 'csv')}
+            disabled={exporting === 'csv'}
+            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-zinc-300 hover:bg-white/10 transition-colors disabled:opacity-50"
           >
-            Export CSV
-          </a>
-          <a
-            href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/api/reports/${sessionId}/export?format=pdf`}
-            className="px-3 py-1.5 border border-brand-600 text-brand-600 rounded-lg text-xs hover:bg-brand-50"
+            {exporting === 'csv' ? 'Exporting...' : 'Export CSV'}
+          </button>
+          <button
+            onClick={() => void download(sessionId, 'pdf')}
+            disabled={exporting === 'pdf'}
+            className="px-3 py-1.5 border border-purple-500/50 text-purple-400 rounded-lg text-xs hover:bg-purple-500/10 transition-colors disabled:opacity-50"
           >
-            Export PDF
-          </a>
+            {exporting === 'pdf' ? 'Exporting...' : 'Export PDF'}
+          </button>
         </div>
       </div>
 
       {/* Header */}
-      <div className="bg-white border rounded-xl p-6 space-y-4">
+      <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 space-y-4">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-xl font-bold">{report.candidateId.name}</h1>
-            <p className="text-gray-500 text-sm">{report.candidateId.email}</p>
-            <p className="text-gray-500 text-sm mt-1">{report.jobRoleId.title} · {report.jobRoleId.domain} · {report.jobRoleId.experienceLevel}</p>
+            <h1 className="text-xl font-bold text-zinc-100">{report.candidateId.name}</h1>
+            <p className="text-zinc-400 text-sm">{report.candidateId.email}</p>
+            <p className="text-zinc-500 text-sm mt-1">{report.jobRoleId.title} · {report.jobRoleId.domain} · {report.jobRoleId.experienceLevel}</p>
           </div>
           <div className="text-right">
-            <p className="text-4xl font-bold">{report.overallScore}<span className="text-lg text-gray-400">/100</span></p>
+            <p className="text-4xl font-bold text-gradient">{report.overallScore}<span className="text-lg text-zinc-500">/100</span></p>
             <span className={`inline-block mt-2 px-3 py-1 rounded-full text-sm font-semibold border ${recommendationColor[report.recommendation] ?? ''}`}>
-              {report.recommendation.replace('_', ' ')}
+              {report.recommendation.replace(/_/g, ' ')}
             </span>
           </div>
         </div>
-        <p className="text-gray-700 text-sm leading-relaxed">{report.summary}</p>
+        <p className="text-zinc-300 text-sm leading-relaxed">{report.summary}</p>
       </div>
 
       {/* Dimension scores */}
-      <div className="bg-white border rounded-xl p-6 space-y-4">
-        <h2 className="font-semibold">Score Breakdown</h2>
+      <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 space-y-4">
+        <h2 className="font-semibold text-zinc-100">Score Breakdown</h2>
         {dimensions.map(d => (
           <div key={d.label}>
             <div className="flex justify-between text-sm mb-1">
-              <span className="text-gray-600">{d.label}</span>
-              <span className="font-medium">{d.value}/100</span>
+              <span className="text-zinc-400">{d.label}</span>
+              <span className="font-medium text-zinc-200">{d.value}/100</span>
             </div>
-            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-              <div className="h-full bg-brand-500 rounded-full" style={{ width: `${d.value}%` }} />
+            <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-purple-500 to-violet-500 rounded-full transition-all" style={{ width: `${d.value}%` }} />
             </div>
           </div>
         ))}
@@ -127,40 +161,52 @@ export default function ReportPage() {
 
       {/* Strengths & weaknesses */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white border rounded-xl p-6">
-          <h2 className="font-semibold mb-3 text-green-700">Strengths</h2>
+        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6">
+          <h2 className="font-semibold mb-3 text-emerald-400">Strengths</h2>
           <ul className="space-y-1">
-            {report.strengths.map((s, i) => <li key={i} className="text-sm text-gray-700">✓ {s}</li>)}
+            {report.strengths.map((s, i) => (
+              <li key={i} className="text-sm text-zinc-300 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" /> {s}
+              </li>
+            ))}
           </ul>
         </div>
-        <div className="bg-white border rounded-xl p-6">
-          <h2 className="font-semibold mb-3 text-red-700">Areas for Improvement</h2>
+        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6">
+          <h2 className="font-semibold mb-3 text-rose-400">Areas for Improvement</h2>
           <ul className="space-y-1">
-            {report.weaknesses.map((w, i) => <li key={i} className="text-sm text-gray-700">✗ {w}</li>)}
+            {report.weaknesses.map((w, i) => (
+              <li key={i} className="text-sm text-zinc-300 flex items-start gap-2">
+                <XCircle className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" /> {w}
+              </li>
+            ))}
           </ul>
         </div>
       </div>
 
       {/* Anti-cheat flags */}
       {report.antiCheatFlags.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-          <h2 className="font-semibold mb-3 text-yellow-800">Anti-Cheat Flags</h2>
+        <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-6">
+          <h2 className="font-semibold mb-3 text-amber-400">Anti-Cheat Flags</h2>
           <ul className="space-y-1">
-            {report.antiCheatFlags.map((f, i) => <li key={i} className="text-sm text-yellow-700">⚠ {f}</li>)}
+            {report.antiCheatFlags.map((f, i) => (
+              <li key={i} className="text-sm text-amber-300/80 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" /> {f}
+              </li>
+            ))}
           </ul>
         </div>
       )}
 
       {/* Question-by-question */}
-      <div className="bg-white border rounded-xl p-6 space-y-4">
-        <h2 className="font-semibold">Question Scores</h2>
+      <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 space-y-4">
+        <h2 className="font-semibold text-zinc-100">Question Scores</h2>
         {report.questionScores.map((q, i) => (
-          <div key={q.questionId} className="border border-gray-100 rounded-lg p-4 space-y-2">
+          <div key={q.questionId} className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-2">
             <div className="flex items-start justify-between gap-4">
-              <p className="text-sm font-medium text-gray-800">Q{i + 1}: {q.questionText}</p>
-              <span className="text-sm font-bold shrink-0">{q.score}/100</span>
+              <p className="text-sm font-medium text-zinc-200">Q{i + 1}: {q.questionText}</p>
+              <span className="text-sm font-bold text-gradient shrink-0">{q.score}/100</span>
             </div>
-            <p className="text-xs text-gray-500 leading-relaxed">{q.summary}</p>
+            <p className="text-xs text-zinc-400 leading-relaxed">{q.summary}</p>
           </div>
         ))}
       </div>

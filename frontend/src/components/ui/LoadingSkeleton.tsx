@@ -12,7 +12,7 @@ export default function LoadingSkeleton({ className, lines = 1 }: SkeletonProps)
         <div
           key={i}
           className={cn(
-            'h-4 bg-gray-200 rounded animate-pulse',
+            'h-4 bg-white/5 rounded animate-shimmer bg-[length:200%_100%] bg-shimmer-gradient',
             i === lines - 1 && lines > 1 && 'w-3/4',
           )}
         />
@@ -23,11 +23,11 @@ export default function LoadingSkeleton({ className, lines = 1 }: SkeletonProps)
 
 export function CardSkeleton({ className }: { className?: string }) {
   return (
-    <div className={cn('bg-white border rounded-lg p-4 space-y-3', className)}>
-      <div className="h-5 bg-gray-200 rounded animate-pulse w-1/3" />
+    <div className={cn('bg-white/5 border border-white/10 rounded-xl p-4 space-y-3', className)}>
+      <div className="h-5 bg-white/5 rounded animate-shimmer bg-[length:200%_100%] bg-shimmer-gradient w-1/3" />
       <div className="space-y-2">
-        <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        <div className="h-4 bg-gray-200 rounded animate-pulse w-5/6" />
+        <div className="h-4 bg-white/5 rounded animate-shimmer bg-[length:200%_100%] bg-shimmer-gradient" />
+        <div className="h-4 bg-white/5 rounded animate-shimmer bg-[length:200%_100%] bg-shimmer-gradient w-5/6" />
       </div>
     </div>
   );
@@ -36,8 +36,8 @@ export function CardSkeleton({ className }: { className?: string }) {
 export function PageSkeleton() {
   return (
     <div className="min-h-screen p-8 max-w-4xl mx-auto space-y-6">
-      <div className="h-8 bg-gray-200 rounded animate-pulse w-1/3" />
-      <div className="h-4 bg-gray-200 rounded animate-pulse w-2/3" />
+      <div className="h-8 bg-white/5 rounded animate-shimmer bg-[length:200%_100%] bg-shimmer-gradient w-1/3" />
+      <div className="h-4 bg-white/5 rounded animate-shimmer bg-[length:200%_100%] bg-shimmer-gradient w-2/3" />
       <div className="grid grid-cols-3 gap-4">
         <CardSkeleton />
         <CardSkeleton />
