@@ -17,4 +17,4 @@ export function createSTTAdapter(): ISTTAdapter {
   return instance;
 }
 
-export type { ISTTAdapter, TranscriptionResult, STTOptions } from './stt.interface';
+export type { ISTTAdapter, ILiveSTTSession, TranscriptionResult, STTOptions } from './stt.interface';

@@ -13,6 +13,7 @@ import { SCORING_QUEUE_NAME } from '../../lib/queue';
 import { scoreSession } from './scoring.service';
 import { generateReport } from '../report/report.service';
 import { InterviewSessionModel } from '../interview/interview.model';
+import { logger } from '../../lib/logger';
 import type { ScoreSessionJobData } from './scoring.queue';
 
 async function bootstrap(): Promise<void> {
@@ -23,37 +24,37 @@ async function bootstrap(): Promise<void> {
     SCORING_QUEUE_NAME,
     async (job) => {
       const { sessionId } = job.data;
-      console.log(`[ScoringWorker] Processing session ${sessionId}`);
+      logger.info({ sessionId }, 'Processing scoring job');
 
       await scoreSession(sessionId);
-      console.log(`[ScoringWorker] Scoring complete for ${sessionId}`);
+      logger.info({ sessionId }, 'Scoring complete');
 
       await generateReport(sessionId);
-      console.log(`[ScoringWorker] Report generated for ${sessionId}`);
+      logger.info({ sessionId }, 'Report generated');
 
       await InterviewSessionModel.findByIdAndUpdate(sessionId, {
         $set: { currentState: 'DONE' },
       });
-      console.log(`[ScoringWorker] Session ${sessionId} marked DONE`);
+      logger.info({ sessionId }, 'Session marked DONE');
     },
     {
-      connection: getRedisClient(),
+      connection: getRedisClient() as never,
       concurrency: 5,
     },
   );
 
   worker.on('completed', (job) => {
-    console.log(`[ScoringWorker] Job ${job.id} completed`);
+    logger.info({ jobId: job.id }, 'Scoring job completed');
   });
 
   worker.on('failed', (job, err) => {
-    console.error(`[ScoringWorker] Job ${job?.id} failed:`, err.message);
+    logger.error({ jobId: job?.id, err: err.message }, 'Scoring job failed');
   });
 
-  console.log('[ScoringWorker] Listening for scoring jobs...');
+  logger.info('Scoring worker listening for jobs');
 }
 
 bootstrap().catch((err) => {
-  console.error('[ScoringWorker] Fatal startup error:', err);
+  logger.fatal({ err }, 'Fatal scoring worker startup error');
   process.exit(1);
 });

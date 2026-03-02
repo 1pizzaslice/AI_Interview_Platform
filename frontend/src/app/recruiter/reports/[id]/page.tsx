@@ -73,8 +73,22 @@ export default function ReportPage() {
 
   return (
     <div className="min-h-screen p-8 max-w-4xl mx-auto space-y-8">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between">
         <Link href="/recruiter/dashboard" className="text-gray-400 hover:text-gray-600 text-sm">← Dashboard</Link>
+        <div className="flex gap-2">
+          <a
+            href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/api/reports/${sessionId}/export?format=csv`}
+            className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
+          >
+            Export CSV
+          </a>
+          <a
+            href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/api/reports/${sessionId}/export?format=pdf`}
+            className="px-3 py-1.5 border border-brand-600 text-brand-600 rounded-lg text-xs hover:bg-brand-50"
+          >
+            Export PDF
+          </a>
+        </div>
       </div>
 
       {/* Header */}

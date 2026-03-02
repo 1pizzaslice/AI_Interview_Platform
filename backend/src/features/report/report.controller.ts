@@ -27,3 +27,22 @@ export async function listMyReportsHandler(
     next(err);
   }
 }
+
+export async function compareReportsHandler(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { sessionIds } = req.query as { sessionIds?: string };
+    if (!sessionIds) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'sessionIds query param required' } });
+      return;
+    }
+    const ids = sessionIds.split(',').slice(0, 4); // max 4
+    const reports = await reportService.getReportsBySessionIds(ids);
+    res.json({ success: true, data: reports });
+  } catch (err) {
+    next(err);
+  }
+}

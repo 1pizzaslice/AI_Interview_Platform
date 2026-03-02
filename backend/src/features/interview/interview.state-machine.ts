@@ -42,7 +42,7 @@ export function transition(
   ctx: StateMachineContext,
   event: TransitionEvent,
 ): InterviewState {
-  const { currentState, totalTopics, currentQuestionIndex } = ctx;
+  const { currentState, totalTopics } = ctx;
 
   // ABANDON is valid from any state
   if (event === 'ABANDON') return 'ABANDONED';

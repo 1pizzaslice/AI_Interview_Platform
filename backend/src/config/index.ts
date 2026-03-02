@@ -34,6 +34,10 @@ const configSchema = z.object({
   SESSION_TIMEOUT_SECONDS: z.coerce.number().default(900),
   ANSWER_TIMEOUT_SECONDS: z.coerce.number().default(90),
   ANSWER_FOLLOWUP_TIMEOUT_SECONDS: z.coerce.number().default(60),
+
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+
+  SENTRY_DSN: z.string().optional(),
 });
 
 function validateConfig() {

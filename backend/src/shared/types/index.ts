@@ -39,6 +39,37 @@ export interface TranscriptEntry {
   text: string;
   state: InterviewState;
   timestamp: Date;
+  responseTimeMs?: number | null;
+}
+
+export interface AnswerEvaluation {
+  needsFollowUp: boolean;
+  reason: 'shallow' | 'vague' | 'contradicts_resume' | 'off_topic' | 'adequate' | 'excellent';
+  detectedStrength: string | null;
+  detectedWeakness: string | null;
+  suggestedProbe: string | null;
+  confidenceLevel: number;
+}
+
+export interface PerformanceSnapshot {
+  averageEvalConfidence: number;
+  excellentCount: number;
+  adequateCount: number;
+  weakCount: number;
+  difficultyBias: 'easier' | 'same' | 'harder';
+}
+
+export interface RedFlag {
+  type: 'ai_generated' | 'memorized_answer' | 'timing_anomaly' | 'resume_contradiction';
+  severity: 'low' | 'medium' | 'high';
+  description: string;
+  evidence: string;
+}
+
+export interface ConsistencyResult {
+  consistencyScore: number;
+  contradictions: string[];
+  flags: string[];
 }
 
 export interface AntiCheatEvent {
@@ -52,6 +83,8 @@ export interface ScoreDimensions {
   communication: number;
   depth: number;
   relevance: number;
+  resumeAlignment?: number;
+  confidence?: number;
 }
 
 export type HiringRecommendation = 'STRONG_HIRE' | 'HIRE' | 'BORDERLINE' | 'NO_HIRE';

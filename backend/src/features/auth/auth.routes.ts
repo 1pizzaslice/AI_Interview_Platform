@@ -7,7 +7,6 @@ import {
   refreshHandler,
   logoutHandler,
 } from './auth.controller';
-import type { AuthenticatedRequest } from '../../shared/types';
 
 const router = Router();
 

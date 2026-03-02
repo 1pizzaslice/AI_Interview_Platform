@@ -2,14 +2,19 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
+import * as Sentry from '@sentry/node';
 import { config } from './config';
 import { AppError } from './shared/errors/app-error';
+import { logger } from './lib/logger';
 
 import authRoutes from './features/auth/auth.routes';
 import candidateRoutes from './features/candidate/candidate.routes';
 import jobRoutes from './features/job/job.routes';
 import interviewRoutes from './features/interview/interview.routes';
 import reportRoutes from './features/report/report.routes';
+import questionBankRoutes from './features/question-bank/question-bank.routes';
+import pipelineRoutes from './features/pipeline/pipeline.routes';
 
 export function createApp() {
   const app = express();
@@ -27,6 +32,51 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+  // --- Rate limiting ---
+  const globalLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many requests, please try again later' } },
+  });
+
+  const authLoginLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many login attempts, please try again later' } },
+  });
+
+  const authRegisterLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many registration attempts, please try again later' } },
+  });
+
+  const interviewCreateLimiter = rateLimit({
+    windowMs: 3_600_000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many interview sessions created, please try again later' } },
+  });
+
+  const resumeUploadLimiter = rateLimit({
+    windowMs: 3_600_000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many resume uploads, please try again later' } },
+  });
+
+  app.use('/api', globalLimiter);
+  app.use('/api/auth/login', authLoginLimiter);
+  app.use('/api/auth/register', authRegisterLimiter);
+
   // --- Static file serving for local uploads ---
   if (config.STORAGE_PROVIDER === 'local') {
     app.use('/uploads', express.static(path.resolve(config.UPLOAD_DIR)));
@@ -41,8 +91,11 @@ export function createApp() {
   app.use('/api/auth', authRoutes);
   app.use('/api/candidates', candidateRoutes);
   app.use('/api/jobs', jobRoutes);
-  app.use('/api/interviews', interviewRoutes);
+  app.use('/api/interviews', interviewCreateLimiter, interviewRoutes);
+  app.use('/api/candidates/resume', resumeUploadLimiter);
   app.use('/api/reports', reportRoutes);
+  app.use('/api/question-banks', questionBankRoutes);
+  app.use('/api/pipeline', pipelineRoutes);
 
   // --- 404 handler ---
   app.use((_req: Request, _res: Response, next: NextFunction) => {
@@ -77,7 +130,8 @@ export function createApp() {
       return;
     }
 
-    console.error('[ErrorHandler] Unhandled error:', err);
+    Sentry.captureException(err);
+    logger.error({ err }, 'Unhandled error');
     res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' },

@@ -9,13 +9,18 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.41.0",
+    "@tensorflow-models/blazeface": "^0.1.0",
+    "@tensorflow/tfjs-backend-webgl": "^4.22.0",
+    "@tensorflow/tfjs-core": "^4.22.0",
+    "axios": "^1.7.2",
+    "clsx": "^2.1.1",
     "next": "^15.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "axios": "^1.7.2",
-    "zustand": "^4.5.2",
-    "clsx": "^2.1.1",
-    "tailwind-merge": "^2.3.0"
+    "recharts": "^3.7.0",
+    "tailwind-merge": "^2.3.0",
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",

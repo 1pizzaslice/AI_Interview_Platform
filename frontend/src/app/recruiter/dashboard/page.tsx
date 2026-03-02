@@ -41,9 +41,23 @@ export default function RecruiterDashboard() {
           <h1 className="text-2xl font-bold">Dashboard</h1>
           <p className="text-gray-500 mt-1">Welcome back, {user?.name}</p>
         </div>
-        <Link href="/recruiter/jobs" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700">
-          Manage Jobs
-        </Link>
+        <div className="flex gap-3">
+          <Link href="/recruiter/analytics" className="px-4 py-2 border border-brand-600 text-brand-600 rounded-lg text-sm font-medium hover:bg-brand-50">
+            Analytics
+          </Link>
+          <Link href="/recruiter/compare" className="px-4 py-2 border border-brand-600 text-brand-600 rounded-lg text-sm font-medium hover:bg-brand-50">
+            Compare
+          </Link>
+          <Link href="/recruiter/pipeline" className="px-4 py-2 border border-brand-600 text-brand-600 rounded-lg text-sm font-medium hover:bg-brand-50">
+            Pipeline
+          </Link>
+          <Link href="/recruiter/question-banks" className="px-4 py-2 border border-brand-600 text-brand-600 rounded-lg text-sm font-medium hover:bg-brand-50">
+            Questions
+          </Link>
+          <Link href="/recruiter/jobs" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700">
+            Manage Jobs
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-4">

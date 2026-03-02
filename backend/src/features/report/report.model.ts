@@ -1,5 +1,5 @@
 import mongoose, { type Document, type Model } from 'mongoose';
-import type { HiringRecommendation } from '../../shared/types';
+import type { HiringRecommendation, RedFlag, ConsistencyResult } from '../../shared/types';
 
 export interface IReport extends Document {
   sessionId: mongoose.Types.ObjectId;
@@ -11,17 +11,22 @@ export interface IReport extends Document {
     communication: number;
     problemSolving: number;
     culturalFit: number;
+    resumeAlignment: number;
   };
   strengths: string[];
   weaknesses: string[];
   recommendation: HiringRecommendation;
   summary: string;
   antiCheatFlags: string[];
+  redFlags: RedFlag[];
+  consistency: ConsistencyResult | null;
+  averageConfidence: number;
   questionScores: Array<{
     questionId: string;
     questionText: string;
     score: number;
     summary: string;
+    confidence: number;
   }>;
   generatedAt: Date;
 }
@@ -32,6 +37,7 @@ const dimensionScoresSchema = new mongoose.Schema(
     communication: { type: Number, required: true },
     problemSolving: { type: Number, required: true },
     culturalFit: { type: Number, required: true },
+    resumeAlignment: { type: Number, default: 50 },
   },
   { _id: false },
 );
@@ -42,6 +48,26 @@ const questionScoreSchema = new mongoose.Schema(
     questionText: { type: String, required: true },
     score: { type: Number, required: true },
     summary: { type: String, required: true },
+    confidence: { type: Number, default: 0.7 },
+  },
+  { _id: false },
+);
+
+const redFlagSchema = new mongoose.Schema(
+  {
+    type: { type: String, enum: ['ai_generated', 'memorized_answer', 'timing_anomaly', 'resume_contradiction'], required: true },
+    severity: { type: String, enum: ['low', 'medium', 'high'], required: true },
+    description: { type: String, required: true },
+    evidence: { type: String, required: true },
+  },
+  { _id: false },
+);
+
+const consistencySchema = new mongoose.Schema(
+  {
+    consistencyScore: { type: Number, required: true },
+    contradictions: [{ type: String }],
+    flags: [{ type: String }],
   },
   { _id: false },
 );
@@ -62,6 +88,9 @@ const reportSchema = new mongoose.Schema<IReport>(
     },
     summary: { type: String, required: true },
     antiCheatFlags: [{ type: String }],
+    redFlags: [redFlagSchema],
+    consistency: { type: consistencySchema, default: null },
+    averageConfidence: { type: Number, default: 0.7 },
     questionScores: [questionScoreSchema],
     generatedAt: { type: Date, default: Date.now },
   },

@@ -4,6 +4,11 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { useInterviewStore } from '@/stores/interview.store';
+import dynamic from 'next/dynamic';
+import ProgressStepper from '@/components/interview/ProgressStepper';
+import EquipmentCheck from '@/components/interview/EquipmentCheck';
+
+const FaceDetector = dynamic(() => import('@/components/interview/FaceDetector'), { ssr: false });
 
 interface Message {
   id: string;
@@ -41,7 +46,16 @@ export default function InterviewPage() {
   const [inputMode, setInputMode] = useState<InputMode>('voice');
   const [noSpeechToast, setNoSpeechToast] = useState(false);
   const [started, setStarted] = useState(false);
+  const [partialTranscript, setPartialTranscript] = useState('');
+  const [totalQuestions, setTotalQuestions] = useState(0);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const sendAntiCheatEvent = useCallback((event: { type: string; timestamp: Date; metadata: Record<string, unknown> }) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'anticheat', sessionId, event }));
+    }
+  }, [sessionId]);
 
   const addMessage = useCallback((speaker: 'ai' | 'candidate', text: string) => {
     setMessages(prev => [...prev, {
@@ -113,11 +127,28 @@ export default function InterviewPage() {
       }
     };
 
+    const handlePaste = (e: ClipboardEvent) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        const pastedText = e.clipboardData?.getData('text') ?? '';
+        wsRef.current.send(JSON.stringify({
+          type: 'anticheat',
+          sessionId,
+          event: {
+            type: 'COPY_PASTE',
+            timestamp: new Date(),
+            metadata: { pastedLength: pastedText.length },
+          },
+        }));
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
+    document.addEventListener('paste', handlePaste);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('paste', handlePaste);
     };
   }, [sessionId]);
 
@@ -151,7 +182,14 @@ export default function InterviewPage() {
         text?: string;
         state?: string;
         reportId?: string;
+        totalQuestions?: number;
+        currentQuestionIndex?: number;
       };
+
+      if (data.type === 'joined') {
+        if (data.totalQuestions) setTotalQuestions(data.totalQuestions);
+        if (data.currentQuestionIndex !== undefined) setCurrentQuestionIndex(data.currentQuestionIndex);
+      }
 
       if (data.type === 'ai_message' && data.text) {
         addMessage('ai', data.text);
@@ -188,8 +226,18 @@ export default function InterviewPage() {
         // If chunks were empty (TTS error / empty response), fallback timer will recover state
       }
 
+      if (data.type === 'partial_transcript' && data.text) {
+        setPartialTranscript(data.text);
+      }
+
       if (data.type === 'candidate_transcript' && data.text) {
+        setPartialTranscript('');
         addMessage('candidate', data.text);
+      }
+
+      if (data.type === 'audio_stop') {
+        // Server requested to stop AI audio (interruption handling)
+        setRecordingState('idle');
       }
 
       if (data.type === 'stt_empty') {
@@ -200,6 +248,11 @@ export default function InterviewPage() {
 
       if (data.type === 'state_change' && data.state) {
         setCurrentState(data.state);
+        // Track question index from TOPIC_N state
+        const topicMatch = data.state.match(/^TOPIC_(\d+)$/);
+        if (topicMatch) {
+          setCurrentQuestionIndex(parseInt(topicMatch[1], 10) - 1);
+        }
       }
 
       if (data.type === 'interview_complete') {
@@ -303,26 +356,16 @@ export default function InterviewPage() {
     }
   };
 
-  // "Start Interview" gate — guarantees user gesture before AudioContext / WS connect
+  // Pre-interview equipment check — guarantees user gesture before AudioContext / WS connect
   if (!started) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center space-y-6 max-w-sm px-6">
-          <div className="text-5xl">🎙</div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Ready to begin?</h1>
-            <p className="text-gray-500 text-sm mt-2">
-              Make sure you&apos;re in a quiet place. The AI interviewer will speak to you — keep your volume on.
-            </p>
-          </div>
-          <button
-            onClick={handleStart}
-            className="w-full py-3 bg-brand-600 text-white rounded-xl font-semibold text-base hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
-          >
-            Start Interview
-          </button>
-        </div>
-      </div>
+      <EquipmentCheck
+        onReady={handleStart}
+        onSkipToText={() => {
+          setInputMode('text');
+          handleStart();
+        }}
+      />
     );
   }
 
@@ -337,9 +380,12 @@ export default function InterviewPage() {
               ? 'The interview session was abandoned.'
               : "Your responses are being scored. You'll be notified when your report is ready."}
           </p>
+          <a href={`/candidate/feedback/${sessionId}`} className="text-brand-600 hover:underline text-sm block mt-2">
+            View Your Feedback
+          </a>
           {reportId && (
-            <a href={`/recruiter/reports/${reportId}`} className="text-brand-600 hover:underline text-sm">
-              View Report
+            <a href={`/recruiter/reports/${reportId}`} className="text-gray-400 hover:underline text-xs">
+              View Full Report (Recruiter)
             </a>
           )}
         </div>
@@ -362,12 +408,20 @@ export default function InterviewPage() {
       <div className="bg-white border-b px-6 py-3 flex items-center justify-between">
         <div>
           <h1 className="font-semibold">AI Interview</h1>
-          <p className="text-xs text-gray-500">State: {currentState}</p>
         </div>
         <span className={`text-xs px-2 py-1 rounded-full ${connected ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
           {connected ? 'Connected' : 'Connecting...'}
         </span>
       </div>
+
+      {/* Progress stepper */}
+      {totalQuestions > 0 && (
+        <ProgressStepper
+          currentState={currentState}
+          totalQuestions={totalQuestions}
+          currentQuestionIndex={currentQuestionIndex}
+        />
+      )}
 
       {/* No-speech toast */}
       {noSpeechToast && (
@@ -390,6 +444,13 @@ export default function InterviewPage() {
             </div>
           </div>
         ))}
+        {partialTranscript && (
+          <div className="flex justify-end">
+            <div className="max-w-[70%] rounded-2xl px-4 py-3 text-sm bg-brand-400/50 text-white italic">
+              {partialTranscript}...
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -463,6 +524,9 @@ export default function InterviewPage() {
           </div>
         </div>
       </div>
+
+      {/* Face detection anti-cheat */}
+      <FaceDetector onAntiCheatEvent={sendAntiCheatEvent} enabled={connected && !isComplete} />
     </div>
   );
 }

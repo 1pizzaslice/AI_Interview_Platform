@@ -4,9 +4,15 @@ import { verifyAccessToken, sanitizeForTTS } from '../../shared/utils';
 import { AppError } from '../../shared/errors/app-error';
 import type { InterviewState, AntiCheatEvent } from '../../shared/types';
 import * as interviewService from './interview.service';
-import { config } from '../../config';
-import { createSTTAdapter } from '../../adapters/stt';
+
+import { createSTTAdapter, type ILiveSTTSession } from '../../adapters/stt';
 import { createTTSAdapter } from '../../adapters/tts';
+import { logger } from '../../lib/logger';
+
+// --- Graduated silence thresholds (in ms) ---
+const SILENCE_NUDGE_MS = 10_000;       // 10s: gentle nudge
+const SILENCE_CHECK_MS = 25_000;       // 25s: "Are you still there?"
+const SILENCE_ABANDON_MS = 45_000;     // 45s: abandon session
 
 interface WSClient {
   ws: WebSocket;
@@ -14,8 +20,14 @@ interface WSClient {
   userId: string;
   role: string;
   pingTimer?: ReturnType<typeof setTimeout>;
-  answerTimer?: ReturnType<typeof setTimeout>;
+  silenceNudgeTimer?: ReturnType<typeof setTimeout>;
+  silenceCheckTimer?: ReturnType<typeof setTimeout>;
+  silenceAbandonTimer?: ReturnType<typeof setTimeout>;
   pendingAudio: Promise<void> | null;
+  lastAiMessageAt: number | null;
+  liveSTT: ILiveSTTSession | null;
+  isTTSSpeaking: boolean;
+  accumulatedTranscript: string;
 }
 
 type ClientEvent =
@@ -36,6 +48,8 @@ function sendError(ws: WebSocket, code: string, message: string): void {
 }
 
 async function sendAIMessageWithAudio(ws: WebSocket, client: WSClient, text: string): Promise<void> {
+  client.lastAiMessageAt = Date.now();
+  client.isTTSSpeaking = true;
   send(ws, { type: 'ai_message', text }); // original text for chat display
   client.pendingAudio = (async () => {
     try {
@@ -51,16 +65,17 @@ async function sendAIMessageWithAudio(ws: WebSocket, client: WSClient, text: str
           resolve();
         });
         stream.on('error', (err: Error) => {
-          console.error('[Gateway] TTS stream error:', err);
+          logger.error({ err }, '[Gateway] TTS stream error');
           send(ws, { type: 'audio_end' });
           resolve();
         });
       });
     } catch (err) {
-      console.error('[Gateway] TTS synthesis error:', err);
+      logger.error({ err }, '[Gateway] TTS synthesis error');
       send(ws, { type: 'audio_end' });
     } finally {
       client.pendingAudio = null;
+      client.isTTSSpeaking = false;
     }
   })();
   await client.pendingAudio;
@@ -77,7 +92,15 @@ async function handleAudioInput(
     return;
   }
 
-  resetAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
+  // If live STT session exists, pipe audio to it
+  if (client.liveSTT) {
+    resetSilenceTimers(client, clients);
+    client.liveSTT.sendAudio(data);
+    return;
+  }
+
+  // Fallback: batch STT (original flow)
+  resetSilenceTimers(client, clients);
 
   if (client.pendingAudio) await client.pendingAudio;
 
@@ -87,7 +110,7 @@ async function handleAudioInput(
     const result = await stt.transcribe(data, { mimeType: 'audio/webm' });
     transcript = result.text.trim();
   } catch (err) {
-    console.error('[Gateway] STT transcription error:', err);
+    logger.error({ err }, '[Gateway] STT transcription error');
     sendError(ws, 'STT_ERROR', 'Failed to transcribe audio');
     return;
   }
@@ -99,11 +122,26 @@ async function handleAudioInput(
 
   send(ws, { type: 'candidate_transcript', text: transcript });
 
+  const audioResponseTimeMs = client.lastAiMessageAt
+    ? Date.now() - client.lastAiMessageAt
+    : null;
+
+  await processAnswerAndRespond(ws, client, clients, transcript, audioResponseTimeMs);
+}
+
+async function processAnswerAndRespond(
+  ws: WebSocket,
+  client: WSClient,
+  clients: Map<WebSocket, WSClient>,
+  answerText: string,
+  responseTimeMs: number | null,
+): Promise<void> {
   try {
     const result = await interviewService.processAnswer(
-      client.sessionId,
+      client.sessionId!,
       client.userId,
-      transcript,
+      answerText,
+      responseTimeMs,
     );
 
     send(ws, {
@@ -124,23 +162,88 @@ async function handleAudioInput(
       if (result.nextState === 'SCORING') {
         send(ws, { type: 'interview_complete', sessionId: client.sessionId });
       }
-      clearAnswerTimeout(client);
+      clearSilenceTimers(client);
+    } else {
+      resetSilenceTimers(client, clients);
     }
   } catch (err) {
     if (err instanceof AppError) {
       sendError(ws, err.code, err.message);
     } else {
-      console.error('[Gateway] processAnswer error (audio):', err);
+      logger.error({ err }, '[Gateway] processAnswer error');
       sendError(ws, 'INTERNAL_ERROR', 'Failed to process answer');
     }
   }
+}
+
+function setupLiveSTT(ws: WebSocket, client: WSClient, clients: Map<WebSocket, WSClient>): void {
+  const stt = createSTTAdapter();
+  if (!stt.createLiveSession) return;
+
+  const liveSession = stt.createLiveSession();
+  if (!liveSession) return;
+
+  client.liveSTT = liveSession;
+
+  liveSession.on('partial', (text: string) => {
+    send(ws, { type: 'partial_transcript', text });
+  });
+
+  liveSession.on('final', (result: { text: string }) => {
+    if (!result.text.trim()) return;
+    client.accumulatedTranscript += (client.accumulatedTranscript ? ' ' : '') + result.text.trim();
+  });
+
+  liveSession.on('utterance_end', () => {
+    const fullTranscript = client.accumulatedTranscript.trim();
+    if (!fullTranscript) return;
+
+    client.accumulatedTranscript = '';
+    send(ws, { type: 'candidate_transcript', text: fullTranscript });
+
+    const responseTimeMs = client.lastAiMessageAt
+      ? Date.now() - client.lastAiMessageAt
+      : null;
+
+    void processAnswerAndRespond(ws, client, clients, fullTranscript, responseTimeMs);
+  });
+
+  liveSession.on('speech_started', () => {
+    // Interruption handling: if AI is speaking and candidate starts talking
+    if (client.isTTSSpeaking) {
+      send(ws, { type: 'audio_stop' });
+      client.isTTSSpeaking = false;
+      // The pending audio promise will still resolve, but the client will stop playback
+    }
+    resetSilenceTimers(client, clients);
+  });
+
+  liveSession.on('error', (err: Error) => {
+    logger.error({ err: err.message }, '[Gateway] Live STT error');
+    // Fall back to batch mode by clearing the live session
+    client.liveSTT = null;
+  });
+
+  liveSession.on('close', () => {
+    client.liveSTT = null;
+  });
 }
 
 export function setupInterviewGateway(wss: WebSocketServer): void {
   const clients = new Map<WebSocket, WSClient>();
 
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
-    const client: WSClient = { ws, sessionId: null, userId: '', role: '', pendingAudio: null };
+    const client: WSClient = {
+      ws,
+      sessionId: null,
+      userId: '',
+      role: '',
+      pendingAudio: null,
+      lastAiMessageAt: null,
+      liveSTT: null,
+      isTTSSpeaking: false,
+      accumulatedTranscript: '',
+    };
     clients.set(ws, client);
 
     ws.on('message', async (data: Buffer, isBinary: boolean) => {
@@ -162,7 +265,8 @@ export function setupInterviewGateway(wss: WebSocketServer): void {
 
     ws.on('close', async () => {
       if (client.pingTimer) clearTimeout(client.pingTimer);
-      if (client.answerTimer) clearTimeout(client.answerTimer);
+      clearSilenceTimers(client);
+      client.liveSTT?.close();
 
       if (client.sessionId) {
         try {
@@ -172,7 +276,7 @@ export function setupInterviewGateway(wss: WebSocketServer): void {
             sessionId: client.sessionId,
           });
         } catch (err) {
-          console.error('[Gateway] Error abandoning session on disconnect:', err);
+          logger.error({ err }, '[Gateway] Error abandoning session on disconnect');
         }
       }
 
@@ -180,7 +284,7 @@ export function setupInterviewGateway(wss: WebSocketServer): void {
     });
 
     ws.on('error', (err: Error) => {
-      console.error('[Gateway] WebSocket error:', err.message);
+      logger.error({ err: err.message }, '[Gateway] WebSocket error');
     });
   });
 }
@@ -214,14 +318,19 @@ async function handleEvent(
           type: 'joined',
           sessionId: event.sessionId,
           currentState: session.currentState,
+          totalQuestions: session.generatedQuestions?.length ?? 0,
+          currentQuestionIndex: session.currentQuestionIndex ?? 0,
         });
 
+        // Set up live STT if supported
+        setupLiveSTT(ws, client, clients);
+
         if (session.currentState === 'INTRO') {
-          const introMessage = await interviewService.getIntroMessage();
+          const introMessage = await interviewService.getIntroMessage(event.sessionId);
           await sendAIMessageWithAudio(ws, client, introMessage);
         }
 
-        startAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
+        startSilenceTimers(client, clients);
       } catch (err) {
         if (err instanceof AppError) {
           sendError(ws, err.code, err.message);
@@ -238,51 +347,21 @@ async function handleEvent(
         return;
       }
 
-      resetAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
+      resetSilenceTimers(client, clients);
 
       if (client.pendingAudio) await client.pendingAudio;
 
-      try {
-        const result = await interviewService.processAnswer(
-          client.sessionId,
-          client.userId,
-          event.text,
-        );
+      const responseTimeMs = client.lastAiMessageAt
+        ? Date.now() - client.lastAiMessageAt
+        : null;
 
-        send(ws, {
-          type: 'transcript_update',
-          entry: result.transcriptEntry,
-        });
-
-        if (result.stateChanged) {
-          send(ws, {
-            type: 'state_change',
-            state: result.nextState,
-          });
-        }
-
-        await sendAIMessageWithAudio(ws, client, result.aiMessage);
-
-        if (result.isComplete) {
-          if (result.nextState === 'SCORING') {
-            send(ws, { type: 'interview_complete', sessionId: client.sessionId });
-          }
-          clearAnswerTimeout(client);
-        }
-      } catch (err) {
-        if (err instanceof AppError) {
-          sendError(ws, err.code, err.message);
-        } else {
-          console.error('[Gateway] processAnswer error:', err);
-          sendError(ws, 'INTERNAL_ERROR', 'Failed to process answer');
-        }
-      }
+      await processAnswerAndRespond(ws, client, clients, event.text, responseTimeMs);
       break;
     }
 
     case 'recording_start': {
       if (!client.sessionId) return;
-      resetAnswerTimeout(client, clients, config.ANSWER_TIMEOUT_SECONDS * 1000);
+      resetSilenceTimers(client, clients);
       break;
     }
 
@@ -291,7 +370,7 @@ async function handleEvent(
       try {
         await interviewService.recordAntiCheatEvent(client.sessionId, event.event);
       } catch (err) {
-        console.error('[Gateway] anticheat recording error:', err);
+        logger.error({ err }, '[Gateway] anticheat recording error');
       }
       break;
     }
@@ -307,41 +386,56 @@ async function handleEvent(
   }
 }
 
-function startAnswerTimeout(
-  client: WSClient,
-  clients: Map<WebSocket, WSClient>,
-  timeoutMs: number,
-): void {
-  client.answerTimer = setTimeout(async () => {
-    await sendAIMessageWithAudio(client.ws, client, "Are you still there? Take your time.");
+// --- Graduated silence detection ---
 
-    client.answerTimer = setTimeout(async () => {
-      if (client.sessionId) {
-        try {
-          await interviewService.abandonSession(client.sessionId);
-          send(client.ws, { type: 'state_change', state: 'ABANDONED' as InterviewState });
-          send(client.ws, { type: 'session_abandoned', reason: 'timeout' });
-        } catch (err) {
-          console.error('[Gateway] Timeout abandon error:', err);
-        }
+function startSilenceTimers(
+  client: WSClient,
+  _clients: Map<WebSocket, WSClient>,
+): void {
+  // Nudge after 10s of silence
+  client.silenceNudgeTimer = setTimeout(async () => {
+    await sendAIMessageWithAudio(client.ws, client, "Take your time, I'm here whenever you're ready.");
+  }, SILENCE_NUDGE_MS);
+
+  // Check after 25s
+  client.silenceCheckTimer = setTimeout(async () => {
+    await sendAIMessageWithAudio(client.ws, client, "Are you still there? No rush at all.");
+  }, SILENCE_CHECK_MS);
+
+  // Abandon after 45s
+  client.silenceAbandonTimer = setTimeout(async () => {
+    if (client.sessionId) {
+      try {
+        await interviewService.abandonSession(client.sessionId);
+        send(client.ws, { type: 'state_change', state: 'ABANDONED' as InterviewState });
+        send(client.ws, { type: 'session_abandoned', reason: 'timeout' });
+      } catch (err) {
+        logger.error({ err }, '[Gateway] Timeout abandon error');
       }
-    }, config.ANSWER_FOLLOWUP_TIMEOUT_SECONDS * 1000);
-  }, timeoutMs);
+    }
+  }, SILENCE_ABANDON_MS);
 }
 
-function resetAnswerTimeout(
+function resetSilenceTimers(
   client: WSClient,
   clients: Map<WebSocket, WSClient>,
-  timeoutMs: number,
 ): void {
-  clearAnswerTimeout(client);
-  startAnswerTimeout(client, clients, timeoutMs);
+  clearSilenceTimers(client);
+  startSilenceTimers(client, clients);
 }
 
-function clearAnswerTimeout(client: WSClient): void {
-  if (client.answerTimer) {
-    clearTimeout(client.answerTimer);
-    client.answerTimer = undefined;
+function clearSilenceTimers(client: WSClient): void {
+  if (client.silenceNudgeTimer) {
+    clearTimeout(client.silenceNudgeTimer);
+    client.silenceNudgeTimer = undefined;
+  }
+  if (client.silenceCheckTimer) {
+    clearTimeout(client.silenceCheckTimer);
+    client.silenceCheckTimer = undefined;
+  }
+  if (client.silenceAbandonTimer) {
+    clearTimeout(client.silenceAbandonTimer);
+    client.silenceAbandonTimer = undefined;
   }
 }
 

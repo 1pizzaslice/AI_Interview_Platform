@@ -1,7 +1,8 @@
 import { createClient } from '@deepgram/sdk';
 import type { DeepgramClient } from '@deepgram/sdk';
 import type { Readable } from 'stream';
-import type { ISTTAdapter, STTOptions, TranscriptionResult } from './stt.interface';
+import type { ISTTAdapter, ILiveSTTSession, STTOptions, TranscriptionResult } from './stt.interface';
+import { DeepgramLiveSTTSession } from './deepgram-live-stt.adapter';
 
 export class DeepgramSTTAdapter implements ISTTAdapter {
   private readonly client: DeepgramClient;
@@ -54,5 +55,9 @@ export class DeepgramSTTAdapter implements ISTTAdapter {
     const buffer = Buffer.concat(chunks);
     const result = await this.transcribe(buffer, options);
     yield result;
+  }
+
+  createLiveSession(options?: STTOptions): ILiveSTTSession | null {
+    return new DeepgramLiveSTTSession(this.client, options);
   }
 }
